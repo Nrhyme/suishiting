@@ -250,7 +250,9 @@ Future<Music163Core> _createTestCore({
       final req0 = body['req_0'] as Map<String, dynamic>? ?? {};
       final method = req0['method'] as String? ?? '';
 
-      if (method == 'do_search_v2') {
+      if (method == 'DoSearchForQQMusicLite') {
+        final param = req0['param'] as Map<String, dynamic>? ?? {};
+        final searchType = param['search_type'];
         return http.Response.bytes(
           utf8.encode(
             jsonEncode({
@@ -259,8 +261,8 @@ Future<Music163Core> _createTestCore({
                 'code': 0,
                 'data': {
                   'body': {
-                    'item_song': {
-                      'items': [
+                    if (searchType == 7)
+                      'item_song': [
                         {
                           'id': 101,
                           'mid': '0039MnYb0qxYhV',
@@ -273,9 +275,10 @@ Future<Music163Core> _createTestCore({
                           'file': {'media_mid': '0039MnYb0qxYhV'},
                         },
                       ],
-                    },
+                    if (searchType == 2) 'item_album': <Object>[],
+                    if (searchType == 1) 'singer': <Object>[],
                   },
-                  'meta': {'sum': 1},
+                  'meta': {'sum': 1, 'nextpage': -1},
                 },
               },
             }),
@@ -1388,7 +1391,10 @@ void main() {
       await _pumpRealIo(tester);
       await tester.pumpAndSettle();
 
-      // 1. 默认进入「推荐」页并展示网易云新歌推荐与来源标签
+      // 1. 默认进入「歌单」页；切到「推荐」页验证网易云新歌推荐与来源标签
+      expect(find.byKey(const Key('playlists_list')), findsWidgets);
+      await tester.tap(find.byKey(const Key('nav_tab_recommendations')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('recommend_source_label')), findsOneWidget);
       expect(find.text('网易云新歌推荐'), findsOneWidget);
       expect(find.text('网易云推荐新歌'), findsOneWidget);
@@ -1536,16 +1542,23 @@ void main() {
       expect(core.library.history, isEmpty);
       expect(find.byKey(const Key('search_history_section')), findsNothing);
 
-      // 3. 切换到「收藏」页，验证已收藏歌曲展示与播放全部入口
+      // 3. 切换到「歌单」页：收藏是固定特殊歌单「我的收藏」
       await tester.tap(find.byKey(const Key('nav_tab_favorites')));
       await tester.pumpAndSettle();
 
-      expect(find.text('本机收藏 (1)'), findsOneWidget);
-      expect(find.byKey(const Key('favorite_song_item_101')), findsOneWidget);
+      expect(find.text('我的歌单 (1)'), findsOneWidget);
+      expect(find.text('我的收藏'), findsOneWidget);
       expect(
-        find.byKey(const Key('favorites_play_all_button')),
+        find.byKey(const Key('playlist_play_btn_favorites')),
         findsOneWidget,
       );
+
+      // 进入「我的收藏」详情页确认收藏歌曲可见
+      await tester.tap(find.byKey(const Key('playlist_item_favorites')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('playlist_detail_songs')), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
 
       // 4. 切换到「设置」页，验证外观主题切换并持久化保存、下载歌词开关与默认折叠的使用说明
       await tester.tap(find.byKey(const Key('nav_tab_account')));

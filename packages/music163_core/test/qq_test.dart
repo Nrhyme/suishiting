@@ -90,16 +90,16 @@ void main() {
         final body = requestBody(r);
         expect(r.url.host, 'u.y.qq.com');
         expect(r.headers.containsKey('cookie'), isFalse);
-        final page = ((body['req_0'] as Map)['param'] as Map)['page_id'] as int;
+        final request = body['req_0'] as Map;
+        expect(request['module'], 'music.search.SearchCgiService');
+        expect(request['method'], 'DoSearchForQQMusicLite');
+        final page = (request['param'] as Map)['page_num'] as int;
         pages.add(page);
         return rpc({
           'body': {
-            'item_song': {
-              'items': [rawSong],
-              'total_num': 2,
-            },
+            'item_song': [rawSong],
           },
-          'meta': {'nextpage': page == 1 ? 2 : -1},
+          'meta': {'nextpage': page == 1 ? 2 : -1, 'sum': 2},
         });
       }),
     );
@@ -114,6 +114,7 @@ void main() {
     await search.setPlatform(MusicPlatform.qq);
     await search.search('歌名');
     expect(search.songs.single.mid, qqSong.mid);
+    expect(search.hasMore, isTrue);
     await search.loadMore();
     expect(pages, [1, 2]);
     expect(search.songs, hasLength(1));

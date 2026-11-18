@@ -103,6 +103,177 @@ class MusicRepository {
   }
 
   QqApi get _qq => qqApi ?? (throw const MusicException('QQ 音乐未初始化。'));
+  Future<ArtistSearchPage> searchArtistsFor(
+    MusicPlatform platform,
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) => platform == MusicPlatform.qq
+      ? _qq.searchArtists(query, offset: offset, limit: limit)
+      : searchArtists(query, offset: offset, limit: limit);
+
+  Future<List<Song>> artistSongsFor(
+    Artist artist, {
+    int offset = 0,
+    int limit = 50,
+  }) => artist.platform == MusicPlatform.qq
+      ? _qq.artistSongs(artist, offset: offset, limit: limit)
+      : neteaseArtistSongs(artist, limit: limit);
+
+  Future<List<Album>> artistAlbumsFor(
+    Artist artist, {
+    int offset = 0,
+    int limit = 30,
+  }) => artist.platform == MusicPlatform.qq
+      ? _qq.artistAlbums(artist, offset: offset, limit: limit)
+      : neteaseArtistAlbums(artist, offset: offset, limit: limit);
+
+  Future<ArtistSearchPage> searchArtists(
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    final reply = await api.request('/api/v1/search/artist/get', {
+      's': query,
+      'offset': offset,
+      'limit': limit,
+    });
+    final result = reply.json['result'] as Map<String, dynamic>? ?? {};
+    final artists = ((result['artists'] as List<dynamic>?) ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (entry) => Artist(
+            id: (entry['id'] as num?)?.toInt() ?? 0,
+            name: entry['name'] as String? ?? '未知歌手',
+            avatarUrl: entry['picUrl'] as String?,
+            songCount: (entry['musicSize'] as num?)?.toInt() ?? 0,
+            albumCount: (entry['albumSize'] as num?)?.toInt() ?? 0,
+            platform: MusicPlatform.netease,
+          ),
+        )
+        .toList();
+    final total = (result['artistCount'] as num? ?? artists.length).toInt();
+    return ArtistSearchPage(
+      artists: artists,
+      total: total,
+      hasMore:
+          artists.isNotEmpty &&
+          (result['hasMore'] as bool? ?? offset + artists.length < total),
+    );
+  }
+
+  /// 网易云歌手歌曲：/api/v1/artist/{id} 返回 hotSongs（约 50 首热门）。
+  Future<List<Song>> neteaseArtistSongs(
+    Artist artist, {
+    int limit = 50,
+  }) async {
+    final reply = await api.request('/api/v1/artist/${artist.id}', {});
+    final songs = (reply.json['hotSongs'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(Song.fromJson)
+        .take(limit)
+        .toList();
+    if (songs.isEmpty) throw const MusicException('该歌手暂无可用歌曲。');
+    return songs;
+  }
+
+  Future<List<Album>> neteaseArtistAlbums(
+    Artist artist, {
+    int offset = 0,
+    int limit = 30,
+  }) async {
+    final reply = await api.request('/api/artist/albums/${artist.id}', {
+      'limit': limit,
+      'offset': offset,
+    });
+    return (reply.json['hotAlbums'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (entry) => Album(
+            id: (entry['id'] as num?)?.toInt() ?? 0,
+            name: entry['name'] as String? ?? '未知专辑',
+            artists:
+                ((entry['artist'] as Map<String, dynamic>?)?['name']
+                    as String?) ??
+                ((entry['artists'] as List<dynamic>? ?? [])
+                    .whereType<Map>()
+                    .map((a) => a['name'] ?? '')
+                    .whereType<String>()
+                    .join(' / ')),
+            artworkUrl:
+                (entry['picUrl'] as String?) ??
+                (entry['blurPicUrl'] as String?),
+            songCount: (entry['size'] as num?)?.toInt() ?? 0,
+            publishTime: (entry['publishTime'] as num?) == null
+                ? ''
+                : DateTime.fromMillisecondsSinceEpoch(
+                    (entry['publishTime'] as num).toInt(),
+                  ).toIso8601String().substring(0, 10),
+            platform: MusicPlatform.netease,
+          ),
+        )
+        .toList();
+  }
+  Future<AlbumSearchPage> searchAlbumsFor(
+    MusicPlatform platform,
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) => platform == MusicPlatform.qq
+      ? _qq.searchAlbums(query, offset: offset, limit: limit)
+      : searchAlbums(query, offset: offset, limit: limit);
+
+  Future<List<Song>> albumSongs(Album album) =>
+      album.platform == MusicPlatform.qq
+      ? _qq.albumSongs(album)
+      : neteaseAlbumSongs(album);
+
+  Future<AlbumSearchPage> searchAlbums(
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    final reply = await api.request('/api/v1/search/album/get', {
+      's': query,
+      'offset': offset,
+      'limit': limit,
+    });
+    final result = reply.json['result'] as Map<String, dynamic>? ?? {};
+    final albums = ((result['albums'] as List<dynamic>?) ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (entry) => Album(
+            id: (entry['id'] as num?)?.toInt() ?? 0,
+            name: entry['name'] as String? ?? '未知专辑',
+            artists:
+                ((entry['artist'] as Map<String, dynamic>?)?['name']
+                    as String?) ??
+                '',
+            artworkUrl: entry['picUrl'] as String?,
+            songCount: (entry['size'] as num?)?.toInt() ?? 0,
+            platform: MusicPlatform.netease,
+          ),
+        )
+        .toList();
+    final total = (result['albumCount'] as num? ?? albums.length).toInt();
+    return AlbumSearchPage(
+      albums: albums,
+      total: total,
+      hasMore:
+          albums.isNotEmpty &&
+          (result['hasMore'] as bool? ?? offset + albums.length < total),
+    );
+  }
+
+  Future<List<Song>> neteaseAlbumSongs(Album album) async {
+    final reply = await api.request('/api/v1/album/${album.id}', {});
+    final songs = (reply.json['songs'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(Song.fromJson)
+        .toList();
+    if (songs.isEmpty) throw const MusicException('专辑内暂无可用曲目。');
+    return songs;
+  }
   Future<SearchPage> searchFor(
     MusicPlatform platform,
     String query, {

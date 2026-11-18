@@ -38,12 +38,13 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  static const int _tabRecommendations = 0;
+  static const int _tabPlaylists = 0;
   static const int _tabSearch = 1;
+  static const int _tabRecommendations = 2;
   static const int _tabDownloads = 3;
   static const int _tabAccount = 4;
 
-  int _selectedIndex = _tabRecommendations;
+  int _selectedIndex = _tabPlaylists;
 
   @override
   void dispose() {
@@ -115,9 +116,9 @@ class _HomeShellState extends State<HomeShell> {
         final colorScheme = Theme.of(context).colorScheme;
 
         final pages = <Widget>[
-          RecommendationsPageView(
+          FavoritesPageView(
             core: widget.core,
-            isActive: _selectedIndex == _tabRecommendations,
+            onNavigateToSearch: () => _selectTab(_tabSearch),
             onNavigateToDownloads: () => _selectTab(_tabDownloads),
           ),
           SearchPageView(
@@ -125,9 +126,9 @@ class _HomeShellState extends State<HomeShell> {
             onNavigateToDownloads: () => _selectTab(_tabDownloads),
             onNavigateToAccount: () => _selectTab(_tabAccount),
           ),
-          FavoritesPageView(
+          RecommendationsPageView(
             core: widget.core,
-            onNavigateToSearch: () => _selectTab(_tabSearch),
+            isActive: _selectedIndex == _tabRecommendations,
             onNavigateToDownloads: () => _selectTab(_tabDownloads),
           ),
           DownloadsPageView(
@@ -214,12 +215,12 @@ class _HomeShellState extends State<HomeShell> {
                             selectedIndex: _selectedIndex,
                             onDestinationSelected: _selectTab,
                             destinations: [
-                              const NavigationRailDestination(
-                                icon: Icon(Icons.explore_outlined),
-                                selectedIcon: Icon(Icons.explore_rounded),
-                                label: Text(
-                                  '推荐',
-                                  key: Key('nav_tab_recommendations'),
+                              NavigationRailDestination(
+                                icon: buildFavoriteIcon(selected: false),
+                                selectedIcon: buildFavoriteIcon(selected: true),
+                                label: const Text(
+                                  '歌单',
+                                  key: Key('nav_tab_favorites'),
                                 ),
                               ),
                               const NavigationRailDestination(
@@ -227,12 +228,12 @@ class _HomeShellState extends State<HomeShell> {
                                 selectedIcon: Icon(Icons.manage_search_rounded),
                                 label: Text('搜索', key: Key('nav_tab_search')),
                               ),
-                              NavigationRailDestination(
-                                icon: buildFavoriteIcon(selected: false),
-                                selectedIcon: buildFavoriteIcon(selected: true),
-                                label: const Text(
-                                  '收藏',
-                                  key: Key('nav_tab_favorites'),
+                              const NavigationRailDestination(
+                                icon: Icon(Icons.explore_outlined),
+                                selectedIcon: Icon(Icons.explore_rounded),
+                                label: Text(
+                                  '推荐',
+                                  key: Key('nav_tab_recommendations'),
                                 ),
                               ),
                               NavigationRailDestination(
@@ -279,11 +280,11 @@ class _HomeShellState extends State<HomeShell> {
                         selectedIndex: _selectedIndex,
                         onDestinationSelected: _selectTab,
                         destinations: [
-                          const NavigationDestination(
-                            key: Key('nav_tab_recommendations'),
-                            icon: Icon(Icons.explore_outlined),
-                            selectedIcon: Icon(Icons.explore_rounded),
-                            label: '推荐',
+                          NavigationDestination(
+                            key: Key('nav_tab_favorites'),
+                            icon: buildFavoriteIcon(selected: false),
+                            selectedIcon: buildFavoriteIcon(selected: true),
+                            label: '歌单',
                           ),
                           const NavigationDestination(
                             key: Key('nav_tab_search'),
@@ -291,11 +292,11 @@ class _HomeShellState extends State<HomeShell> {
                             selectedIcon: Icon(Icons.manage_search_rounded),
                             label: '搜索',
                           ),
-                          NavigationDestination(
-                            key: Key('nav_tab_favorites'),
-                            icon: buildFavoriteIcon(selected: false),
-                            selectedIcon: buildFavoriteIcon(selected: true),
-                            label: '收藏',
+                          const NavigationDestination(
+                            key: Key('nav_tab_recommendations'),
+                            icon: Icon(Icons.explore_outlined),
+                            selectedIcon: Icon(Icons.explore_rounded),
+                            label: '推荐',
                           ),
                           NavigationDestination(
                             key: Key('nav_tab_downloads'),

@@ -100,6 +100,81 @@ class SearchPage {
 }
 
 @immutable
+class Artist {
+  const Artist({
+    required this.id,
+    required this.name,
+    this.mid,
+    this.avatarUrl,
+    this.songCount = 0,
+    this.albumCount = 0,
+    this.platform = MusicPlatform.netease,
+  });
+  final int id;
+  final String? mid;
+  final String name;
+  final String? avatarUrl;
+  final int songCount;
+  final int albumCount;
+  final MusicPlatform platform;
+  String get key =>
+      platform == MusicPlatform.qq ? 'qq_artist_${mid ?? id}' : 'artist_$id';
+}
+
+@immutable
+class ArtistSearchPage {
+  ArtistSearchPage({
+    required List<Artist> artists,
+    required this.hasMore,
+    required this.total,
+    this.nextOffset,
+  }) : artists = List.unmodifiable(artists);
+  final List<Artist> artists;
+  final bool hasMore;
+  final int total;
+  final int? nextOffset;
+}
+
+@immutable
+class Album {
+  const Album({
+    required this.id,
+    required this.name,
+    required this.artists,
+    this.mid,
+    this.artworkUrl,
+    this.songCount = 0,
+    this.publishTime = '',
+    this.platform = MusicPlatform.netease,
+  });
+  final int id;
+  final String? mid;
+  final String name;
+  final String artists;
+  final String? artworkUrl;
+  final int songCount;
+  final String publishTime;
+  final MusicPlatform platform;
+  String get key =>
+      platform == MusicPlatform.qq ? 'qq_album_${mid ?? id}' : 'album_$id';
+  String get displayId => mid ?? '$id';
+}
+
+@immutable
+class AlbumSearchPage {
+  AlbumSearchPage({
+    required List<Album> albums,
+    required this.hasMore,
+    required this.total,
+    this.nextOffset,
+  }) : albums = List.unmodifiable(albums);
+  final List<Album> albums;
+  final bool hasMore;
+  final int total;
+  final int? nextOffset;
+}
+
+@immutable
 class AccountProfile {
   const AccountProfile({
     required this.id,

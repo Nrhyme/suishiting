@@ -122,7 +122,6 @@ class QqApi {
   final http.Client _client;
   QqCredential? credential;
   Future<void> Function()? beforeAuthorizedRequest;
-  final Map<(String, int), Map<String, dynamic>> _searchPages = {};
   static const _referer = 'https://y.qq.com/';
   static const _jump = 'https://graph.qq.com/oauth2.0/login_jump';
   static const _redirect =
@@ -139,6 +138,7 @@ class QqApi {
     bool mobile = false,
     int? loginType,
     String? loginCookies,
+    Map<String, dynamic>? commOverrides,
   }) async {
     final active = anonymous ? null : account ?? credential;
     final gtk = qqHash(active?.musicKey ?? '', 5381);
@@ -167,6 +167,7 @@ class QqApi {
         'OpenUDID': '0',
         'QIMEI36': '0',
       },
+      ...?commOverrides,
     };
     final response = await _client
         .post(
@@ -202,49 +203,311 @@ class QqApi {
     return item?['data'] as Map<String, dynamic>? ?? {};
   }
 
+  /// 单曲搜索：官方 Lite 通道 search_type=7（歌曲 tab）。
+  /// 旧的 adaptor do_search_v2 通道会被平台以 2001 软限流，故统一走 Lite。
   Future<SearchPage> search(
     String query, {
     int offset = 0,
     int limit = 20,
   }) async {
-    final cursor = offset <= 0 ? null : _searchPages[(query, offset)];
-    final data = await call('music.adaptor.SearchAdaptor', 'do_search_v2', {
-      'searchid': cursor?['sid'] ?? '${DateTime.now().microsecondsSinceEpoch}',
-      'search_type': 100,
-      'page_num': limit,
-      'query': query,
-      'page_id': offset <= 0 ? 1 : offset,
-      'highlight': 0,
-      'grp': 1,
-      if (cursor?['start'] != null) 'page_start': cursor!['start'],
-    });
+    final page = offset <= 0 ? 1 : offset;
+    final data = await call(
+      'music.search.SearchCgiService',
+      'DoSearchForQQMusicLite',
+      {
+        'search_id':
+            '${DateTime.now().millisecondsSinceEpoch}${DateTime.now().microsecond % 1000}',
+        'remoteplace': 'search.android.keyboard',
+        'query': query,
+        'search_type': 7,
+        'num_per_page': limit,
+        'page_num': page,
+        'highlight': 0,
+        'nqc_flag': 0,
+        'page_id': 1,
+        'grp': 1,
+      },
+      commOverrides: _liteComm,
+    );
     final body = data['body'] as Map<String, dynamic>? ?? {};
-    final group =
-        (body['item_song'] ?? data['song']) as Map<String, dynamic>? ?? {};
-    final raw = (group['items'] ?? group['list']) as List<dynamic>? ?? [];
+    final group = body['item_song'];
+    final raw = group is List
+        ? group
+        : ((group as Map?)?['items'] as List<dynamic>?) ?? const [];
     final songs = raw.whereType<Map<String, dynamic>>().map(parseSong).toList();
     final meta = data['meta'] as Map<String, dynamic>? ?? {};
     final total =
-        ((group['total_num'] ?? group['totalnum'] ?? meta['sum']) as num?)
-            ?.toInt() ??
-        offset + songs.length;
+        ((meta['sum'] ?? meta['estimate_sum']) as num?)?.toInt() ??
+        page * limit;
     final next = (meta['nextpage'] as num?)?.toInt();
-    if (next != null && next > 0) {
-      if (_searchPages.length >= 64) {
-        _searchPages.remove(_searchPages.keys.first);
-      }
-      _searchPages[(query, next)] = {
-        'sid': meta['sid'],
-        'start': meta['nextpage_start'],
-      };
-    }
     return SearchPage(
       songs: songs,
-      hasMore:
-          songs.isNotEmpty && (next == null ? songs.length >= limit : next > 0),
+      hasMore: songs.isNotEmpty && next != null && next > page,
       total: total,
-      nextOffset: next ?? (offset <= 0 ? 2 : offset + 1),
+      nextOffset: (next != null && next > page) ? next : null,
     );
+  }
+
+  /// 官方 Lite 客户端搜索身份：专辑 tab 只有带这组 comm 才返回条目（2026-11 实测）。
+  static const _liteComm = <String, dynamic>{
+    'ct': 11,
+    'cv': '1003006',
+    'v': '1003006',
+    'tmeAppID': 'qqmusic',
+    'nettype': 'NETWORK_WIFI',
+    'udid': '0',
+    'uid': '0',
+  };
+
+  /// QQ 歌手搜索：Lite 搜索 search_type=1 返回 singer 列表。
+  Future<ArtistSearchPage> searchArtists(
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    final page = offset <= 0 ? 1 : offset;
+    final data = await call(
+      'music.search.SearchCgiService',
+      'DoSearchForQQMusicLite',
+      {
+        'search_id':
+            '${DateTime.now().millisecondsSinceEpoch}${DateTime.now().microsecond % 1000}',
+        'remoteplace': 'search.android.keyboard',
+        'query': query,
+        'search_type': 1,
+        'num_per_page': limit,
+        'page_num': page,
+        'highlight': 0,
+        'nqc_flag': 0,
+        'page_id': 1,
+        'grp': 1,
+      },
+      commOverrides: _liteComm,
+    );
+    final body = data['body'] as Map<String, dynamic>? ?? {};
+    final raw = body['singer'];
+    final list = raw is List ? raw : const [];
+    final artists = list.whereType<Map<String, dynamic>>().map((entry) {
+      final mid = (entry['singerMID'] ??
+              entry['singerMid'] ??
+              entry['singer_mid'] ??
+              entry['mid']) as String?;
+      final id = (entry['singerID'] ?? entry['singer_id'] ?? entry['id'])
+          as num?;
+      if ((mid == null || mid.isEmpty) && id == null) return null;
+      return Artist(
+        id: id?.toInt() ?? 0,
+        mid: mid == null || mid.isEmpty ? null : mid,
+        name: (entry['singerName'] ?? entry['singer_name'] ?? entry['name'])
+                as String? ??
+            '未知歌手',
+        avatarUrl: (entry['singerPic'] ?? entry['singer_pic']) as String?,
+        songCount: ((entry['songNum'] ?? entry['song_num']) as num?)?.toInt() ?? 0,
+        albumCount:
+            ((entry['albumNum'] ?? entry['album_num']) as num?)?.toInt() ?? 0,
+        platform: MusicPlatform.qq,
+      );
+    }).whereType<Artist>().toList();
+    final meta = data['meta'] as Map<String, dynamic>? ?? {};
+    final total = ((meta['sum'] ?? meta['estimate_sum']) as num?)?.toInt() ??
+        page * limit;
+    final next = (meta['nextpage'] as num?)?.toInt();
+    return ArtistSearchPage(
+      artists: artists,
+      hasMore: artists.isNotEmpty && next != null && next > page,
+      total: total,
+      nextOffset: (next != null && next > page) ? next : null,
+    );
+  }
+
+  /// 歌手歌曲：web_singer_info_svr 返回 songlist（含完整 file/album 字段）。
+  Future<List<Song>> artistSongs(
+    Artist artist, {
+    int offset = 0,
+    int limit = 50,
+  }) async {
+    final mid = artist.mid;
+    if (mid == null || mid.isEmpty) {
+      throw const MusicException('该歌手缺少标识，无法获取歌曲。');
+    }
+    final data = await call(
+      'music.web_singer_info_svr',
+      'get_singer_detail_info',
+      {
+        'singermid': mid,
+        'sort': 5,
+        'num': limit,
+        'begin': offset,
+      },
+    );
+    return (data['songlist'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(parseSong)
+        .toList();
+  }
+
+  /// 歌手专辑：AlbumListServer.GetAlbumList（begin 为偏移）。
+  Future<List<Album>> artistAlbums(
+    Artist artist, {
+    int offset = 0,
+    int limit = 30,
+  }) async {
+    final mid = artist.mid;
+    if (mid == null || mid.isEmpty) {
+      throw const MusicException('该歌手缺少标识，无法获取专辑。');
+    }
+    final data = await call(
+      'music.musichallAlbum.AlbumListServer',
+      'GetAlbumList',
+      {'singermid': mid, 'begin': offset, 'num': limit, 'sort': 5},
+    );
+    return (data['albumList'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map((entry) {
+          final albumMid = entry['albumMid'] as String?;
+          return Album(
+            id: (entry['albumID'] as num?)?.toInt() ?? 0,
+            mid: albumMid,
+            name: entry['albumName'] as String? ?? '未知专辑',
+            artists: entry['singerName'] as String? ?? artist.name,
+            artworkUrl: albumMid == null || albumMid.isEmpty
+                ? null
+                : 'https://y.gtimg.cn/music/photo_new/T002R500x500M000$albumMid.jpg',
+            songCount: (entry['totalNum'] as num?)?.toInt() ?? 0,
+            publishTime: entry['publishDate'] as String? ?? '',
+            platform: MusicPlatform.qq,
+          );
+        })
+        .toList();
+  }
+
+  Future<AlbumSearchPage> searchAlbums(
+    String query, {
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    // search_type=2 为「专辑」tab；分页用页码（meta.nextpage）。
+    final page = offset <= 0 ? 1 : offset;
+    final data = await call(
+      'music.search.SearchCgiService',
+      'DoSearchForQQMusicLite',
+      {
+        'search_id':
+            '${DateTime.now().millisecondsSinceEpoch}${DateTime.now().microsecond % 1000}',
+        'remoteplace': 'search.android.keyboard',
+        'query': query,
+        'search_type': 2,
+        'num_per_page': limit,
+        'page_num': page,
+        'highlight': 0,
+        'nqc_flag': 0,
+        'page_id': 1,
+        'grp': 1,
+      },
+      commOverrides: _liteComm,
+    );
+    final body = data['body'] as Map<String, dynamic>? ?? {};
+    final group = body['item_album'];
+    final raw = group is List
+        ? group
+        : ((group as Map?)?['items'] as List<dynamic>?) ?? const [];
+    final albums = raw.whereType<Map<String, dynamic>>().map((entry) {
+      final albumMid =
+          (entry['albummid'] ?? entry['albumMid'] ?? entry['album_mid'])
+              as String?;
+      final albumId =
+          (entry['id'] ?? entry['albumID'] ?? entry['album_id']) as num?;
+      if ((albumMid == null || albumMid.isEmpty) && albumId == null) {
+        return null;
+      }
+      final singer = entry['singer'];
+      final artists = singer is String
+          ? singer
+          : (singer as List<dynamic>? ?? [])
+                .whereType<Map>()
+                .map((s) => s['name'] ?? '')
+                .whereType<String>()
+                .where((s) => s.isNotEmpty)
+                .join(' / ');
+      return Album(
+        id: albumId?.toInt() ?? 0,
+        mid: albumMid == null || albumMid.isEmpty ? null : albumMid,
+        name:
+            (entry['name'] ?? entry['albumName'] ?? entry['album_name'])
+                as String? ??
+            '未知专辑',
+        artists: artists,
+        artworkUrl: albumMid == null || albumMid.isEmpty
+            ? null
+            : 'https://y.gtimg.cn/music/photo_new/T002R500x500M000$albumMid.jpg',
+        songCount: ((entry['song_num'] ?? entry['song_count']) as num?)
+                ?.toInt() ??
+            0,
+        publishTime:
+            (entry['publish_date'] ?? entry['publicTime']) as String? ?? '',
+        platform: MusicPlatform.qq,
+      );
+    }).whereType<Album>().toList();
+    final meta = data['meta'] as Map<String, dynamic>? ?? {};
+    final total =
+        ((meta['sum'] ?? meta['estimate_sum']) as num?)?.toInt() ??
+        page * limit;
+    final next = (meta['nextpage'] as num?)?.toInt();
+    return AlbumSearchPage(
+      albums: albums,
+      hasMore: albums.isNotEmpty && next != null && next > page,
+      total: total,
+      nextOffset: (next != null && next > page) ? next : null,
+    );
+  }
+
+  Future<List<Song>> albumSongs(Album album) async {
+    final albumMid = album.mid;
+    if (albumMid == null || albumMid.isEmpty) {
+      throw const MusicException('该专辑缺少标识，无法获取曲目。');
+    }
+    final response = await _client
+        .get(
+          Uri.https('c.y.qq.com', '/v8/fcg-bin/fcg_v8_album_info_cp.fcg', {
+            'albummid': albumMid,
+            'format': 'json',
+            'outCharset': 'utf-8',
+          }),
+          headers: {'Referer': _referer, 'User-Agent': _ua},
+        )
+        .timeout(const Duration(seconds: 20));
+    _checkHttp(response);
+    final data =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final body = data['data'] as Map<String, dynamic>? ?? {};
+    final singerName =
+        ((body['singer'] as List<dynamic>? ?? [])
+            .whereType<Map>()
+            .map((s) => s['name'] ?? '')
+            .whereType<String>()
+            .where((s) => s.isNotEmpty)
+            .firstOrNull) ??
+        album.artists;
+    return (body['list'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map((entry) {
+          final normalized = <String, dynamic>{
+            ...entry,
+            if ((entry['singer'] as List?) == null ||
+                (entry['singer'] as List).isEmpty)
+              'singer': [
+                {'name': singerName},
+              ],
+            'album': {
+              'mid': albumMid,
+              'name': (body['name'] ?? album.name) as String? ?? album.name,
+              'albummid': albumMid,
+              'name_alt': '',
+            },
+          };
+          return parseSong(normalized);
+        })
+        .toList();
   }
 
   Future<List<Song>> recommendations() async {
